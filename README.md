@@ -1,4 +1,2 @@
 # discrete-int3472
-ACPI driver for discrete type INT3472 ACPI devices
-
-Can't decide whether to build this into cio2-bridge or have it be its own module...just storing the half-done "own module" progress whilst I flip flop back to "build into cio2-bridge" mood for a while...
+ACPI driver for discrete type INT3472 ACPI devices. These are dummy ACPI devices that expose GPIO lines intended to be used by sensor devices, in DSDT tables for platforms designed for windows. This driver maps those lines into regulators and gpios to be consumed by the sensor via the usual frameworks.
