@@ -1,39 +1,41 @@
-From ac159cdf7395e0d7a020d3545c4fa2eb0b6979d1 Mon Sep 17 00:00:00 2001
-From: Dan Scally <djrscally@gmail.com>
+From 9f5e86827e23c57ceae9212fcf81979e78b56687 Mon Sep 17 00:00:00 2001
+From: Daniel Scally <djrscally@gmail.com>
 Date: Thu, 26 Nov 2020 21:12:41 +0000
-Subject: [PATCH] acpi: utils: Add function to fetch dependent acpi_devices
+Subject: [PATCH 14/18] acpi: utils: Add function to fetch dependent
+ acpi_devices
 
 ACPI devices declare themselves dependent on other devices via the _DEP
 buffer. Fetching the dependee from dependent is a matter of parsing
 _DEP, but currently there's no method to fetch dependent from dependee.
-Add one.
+Add one, so we can parse sensors dependent on a PMIC from the PMIC's
+acpi_driver.
 
-Signed-off-by: Dan Scally <djrscally@gmail.com>
+Signed-off-by: Daniel Scally <djrscally@gmail.com>
 ---
- drivers/acpi/utils.c    | 70 +++++++++++++++++++++++++++++++++++++++++
+ drivers/acpi/utils.c    | 68 +++++++++++++++++++++++++++++++++++++++++
  include/acpi/acpi_bus.h |  2 ++
- 2 files changed, 72 insertions(+)
+ 2 files changed, 70 insertions(+)
 
 diff --git a/drivers/acpi/utils.c b/drivers/acpi/utils.c
-index c177165c8db2..569c24aee1dd 100644
+index c177165c8db2..7099529121db 100644
 --- a/drivers/acpi/utils.c
 +++ b/drivers/acpi/utils.c
-@@ -807,6 +807,54 @@ static int acpi_dev_match_cb(struct device *dev, const void *data)
+@@ -807,6 +807,52 @@ static int acpi_dev_match_cb(struct device *dev, const void *data)
  	return hrv == match->hrv;
  }
  
 +static int acpi_dev_match_by_dep(struct device *dev, const void *data)
 +{
-+        struct acpi_device *adev = to_acpi_device(dev);
-+        const struct acpi_device *dependee = data;
++	struct acpi_device *adev = to_acpi_device(dev);
++	const struct acpi_device *dependee = data;
 +	struct acpi_handle_list dep_handles;
-+        struct acpi_device *candidate;
++	struct acpi_device *candidate;
 +	acpi_handle handle;
 +	acpi_status status;
 +	unsigned int i;
-+        int ret;
++	int ret;
 +
-+        handle = adev->handle;
++	handle = adev->handle;
 +
 +	if (!acpi_has_method(handle, "_DEP"))
 +		return 0;
@@ -51,29 +53,27 @@ index c177165c8db2..569c24aee1dd 100644
 +
 +		if (info->valid & ACPI_VALID_HID) {
 +			ret = acpi_bus_get_device(dep_handles.handles[i], &candidate);
-+			if (ret) {
++			if (ret || !candidate) {
 +				kfree(info);
-+                                continue;
-+                        }
++				continue;
++			}
 +
-+                        if (candidate == dependee) {
-+                                acpi_dev_put(candidate);
-+                                kfree(info);
-+                                return 1;
-+                        }
++			if (candidate == dependee) {
++				acpi_dev_put(candidate);
++				kfree(info);
++				return 1;
++			}
 +
-+                        acpi_dev_put(candidate);
-+                        kfree(info);
++			kfree(info);
 +		}
-+                kfree(info);
 +	}
-+        return 0;
++	return 0;
 +}
 +
  /**
   * acpi_dev_present - Detect that a given ACPI device is present
   * @hid: Hardware ID of the device.
-@@ -842,6 +890,28 @@ bool acpi_dev_present(const char *hid, const char *uid, s64 hrv)
+@@ -842,6 +888,28 @@ bool acpi_dev_present(const char *hid, const char *uid, s64 hrv)
  }
  EXPORT_SYMBOL(acpi_dev_present);
  
@@ -81,21 +81,21 @@ index c177165c8db2..569c24aee1dd 100644
 + * acpi_dev_get_next_dep_dev - Return next ACPI device dependent on input dev
 + * @adev: Pointer to the dependee device
 + * @prev: Pointer to the previous dependent device (or NULL for first match)
-+ * 
++ *
 + * Return the next ACPI device which declares itself dependent on @adev in
 + * the _DEP buffer.
-+ * 
++ *
 + * The caller is responsible to call put_device() on the returned device.
 + */
 +struct acpi_device *acpi_dev_get_next_dep_dev(struct acpi_device *adev,
-+                                              struct acpi_device *prev)
++					      struct acpi_device *prev)
 +{
-+        struct device *start = prev ? &prev->dev : NULL;
-+        struct device *dev;
++	struct device *start = prev ? &prev->dev : NULL;
++	struct device *dev;
 +
-+        dev = bus_find_device(&acpi_bus_type, start, adev, acpi_dev_match_by_dep);
++	dev = bus_find_device(&acpi_bus_type, start, adev, acpi_dev_match_by_dep);
 +
-+        return dev ? to_acpi_device(dev) : NULL;
++	return dev ? to_acpi_device(dev) : NULL;
 +}
 +EXPORT_SYMBOL(acpi_dev_get_next_dep_dev);
 +
@@ -103,7 +103,7 @@ index c177165c8db2..569c24aee1dd 100644
   * acpi_dev_get_next_match_dev - Return the next match of ACPI device
   * @adev: Pointer to the previous acpi_device matching this hid, uid and hrv
 diff --git a/include/acpi/acpi_bus.h b/include/acpi/acpi_bus.h
-index 4a9dd723304e..79181f935a0a 100644
+index 0a028ba967d3..f5dfeb030b9c 100644
 --- a/include/acpi/acpi_bus.h
 +++ b/include/acpi/acpi_bus.h
 @@ -688,6 +688,8 @@ static inline bool acpi_device_can_poweroff(struct acpi_device *adev)
@@ -111,7 +111,7 @@ index 4a9dd723304e..79181f935a0a 100644
  bool acpi_dev_hid_uid_match(struct acpi_device *adev, const char *hid2, const char *uid2);
  
 +struct acpi_device *
-+acpi_dev_get_next_match_dev(struct acpi_device *adev, struct acpi_device *prev);
++acpi_dev_get_next_dep_dev(struct acpi_device *adev, struct acpi_device *prev);
  struct acpi_device *
  acpi_dev_get_next_match_dev(struct acpi_device *adev, const char *hid, const char *uid, s64 hrv);
  struct acpi_device *
